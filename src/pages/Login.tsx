@@ -67,7 +67,7 @@ export function Login() {
       </div>
       <footer className="login-foot">
         <span>Status : {navigator.onLine ? 'Connected' : 'Offline'}</span>
-        <span>Version : 1.0.0.1</span>
+        <span>Version : 1.0.0.1 ({__BUILD__})</span>
       </footer>
     </div>
   )
