@@ -41,7 +41,7 @@ export function Login() {
   return (
     <div className="frame login">
       <div className="login-body">
-        <h1>GECS</h1>
+        <h1>IPOS Mobile</h1>
         <input
           placeholder="Username"
           value={username}
