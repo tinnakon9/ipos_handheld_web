@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import type { UserInfoResult } from '../api/types'
+import logo from '../assets/ipos-logo.png'
 import { useGuard } from '../state/guard'
 import { useSession } from '../state/session'
 import { useUi } from '../state/ui'
@@ -41,7 +42,7 @@ export function Login() {
   return (
     <div className="frame login">
       <div className="login-body">
-        <h1>IPOS Mobile</h1>
+        <img className="logo" src={logo} alt="IPOS - ITA Prototype Order System" />
         <input
           placeholder="Username"
           value={username}
