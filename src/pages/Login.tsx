@@ -42,7 +42,10 @@ export function Login() {
   return (
     <div className="frame login">
       <div className="login-body">
-        <img className="logo" src={logo} alt="IPOS - ITA Prototype Order System" />
+        <div className="brand">
+          <img className="logo" src={logo} alt="IPOS" />
+          <div className="brand-sub"><i />Handheld Web<i /></div>
+        </div>
         <input
           placeholder="Username"
           value={username}

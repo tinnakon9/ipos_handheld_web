@@ -38,7 +38,10 @@ input:disabled { background: #e5e7eb; }
 .remain { font-weight: 700; margin: 8px 0; }
 .login { background: lightsteelblue; }
 .login-body { flex: 1; padding: 40px 20px; display: grid; gap: 12px; align-content: start; }
-.login-body .logo { display: block; width: min(260px, 72%); height: auto; margin: 0 auto 8px; }
+.brand { text-align: center; margin: 0 0 14px; }
+.login-body .logo { display: block; width: min(240px, 66%); height: auto; margin: 0 auto 10px; }
+.brand-sub { display: flex; align-items: center; justify-content: center; gap: 10px; color: #4a4a4c; font-size: 14px; font-weight: 600; letter-spacing: .38em; text-transform: uppercase; }
+.brand-sub i { display: block; width: 26px; height: 2px; background: #29abe2; border-radius: 1px; }
 .login-body .row .btn { flex: 1; }
 .login-foot { background: midnightblue; color: #fff; display: flex; justify-content: space-between; padding: 8px 12px; font-size: 13px; }
 .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: grid; place-items: center; z-index: 30; padding: 16px; }
