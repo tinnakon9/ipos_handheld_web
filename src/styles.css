@@ -36,7 +36,7 @@ input:disabled { background: #e5e7eb; }
 .big { font-size: 20px; font-weight: 700; text-align: center; margin: 24px 0; background: var(--light); padding: 28px 8px; }
 .green { color: seagreen; } .red-text { color: #d00; }
 .remain { font-weight: 700; margin: 8px 0; }
-.login { background: lightsteelblue; }
+.login { background: #fff; }
 .login-body { flex: 1; padding: 40px 20px; display: grid; gap: 12px; align-content: start; }
 .brand { text-align: center; margin: 0 0 14px; }
 .login-body .logo { display: block; width: min(240px, 66%); height: auto; margin: 0 auto 10px; }
