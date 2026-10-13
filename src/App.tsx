@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { HashRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { Login } from './pages/Login'
 import { Menu } from './pages/Menu'
 import { Oversea } from './pages/Oversea'
@@ -17,15 +17,15 @@ function Private({ children }: { children: ReactNode }) {
 
 export function App() {
   return (
-    <BrowserRouter>
+    <HashRouter>
       <UiProvider>
         <SessionProvider>
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/" element={<Private><Menu /></Private>} />
             <Route path="/receipt" element={<Private><Receipt /></Private>} />
-            <Route path="/stock-in" element={<Private><TagShelf title="Stock In" storageKey="stock-in" endpoint="/handheld/receipt/stockin" shelfField="shelfNo" shelfLabel="Shelf" /></Private>} />
-            <Route path="/change-location" element={<Private><TagShelf title="Change Location" storageKey="change-location" endpoint="/handheld/shelfs/change" shelfField="toShelf" shelfLabel="Go To Shelf" /></Private>} />
+            <Route path="/stock-in" element={<Private><TagShelf title="Stock In" storageKey="stock-in" endpoint="/handheld/receipt/stockin" shelfField="shelfNo" stockIn /></Private>} />
+            <Route path="/change-location" element={<Private><TagShelf title="Change Location" storageKey="change-location" endpoint="/handheld/shelfs/change" shelfField="toShelf" stockIn={false} /></Private>} />
             <Route path="/oversea" element={<Private><Oversea /></Private>} />
             <Route path="/rfs" element={<Private><Rfs /></Private>} />
             <Route path="/stock-out" element={<Private><StockOut /></Private>} />
@@ -33,6 +33,6 @@ export function App() {
           </Routes>
         </SessionProvider>
       </UiProvider>
-    </BrowserRouter>
+    </HashRouter>
   )
 }

@@ -46,13 +46,13 @@ describe('request stock out', () => {
     expect(stockOut(rso(), 'NOPE', 1)).toMatchObject({ ok: false })
     expect(stockOut(rso(), 'TAG', 0)).toMatchObject({ ok: false, error: 'Invalid Quantity' })
   })
-  it('blocks confirm until request fully picked, suggests min(stock, request)', () => {
+  it('blocks confirm until request fully picked, prefills total stock qty', () => {
     const s = rso()
     expect(rsoSummary(s).canConfirm).toBe(false)
-    expect(lookupTag(s, 'TAG')?.suggestedQty).toBe(5)
+    expect(lookupTag(s, 'TAG')?.stockQty).toBe(7)
     const partial = stockOut(s, 'TAG', 2).state!
     expect(rsoSummary(partial).canConfirm).toBe(false)
-    expect(lookupTag(partial, 'TAG')?.suggestedQty).toBe(3)
+    expect(lookupTag(partial, 'TAG')?.stockQty).toBe(7)
   })
 })
 

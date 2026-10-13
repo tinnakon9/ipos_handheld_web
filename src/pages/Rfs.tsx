@@ -1,59 +1,67 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import type { ShippingDoc } from '../api/types'
-import { Page, ResultPanel, Table } from '../components/Page'
+import { Field, Grid, Screen } from '../components/Page'
+import { ResultScreens, type ResultData } from '../components/ResultScreens'
 import { ScanInput } from '../components/ScanInput'
 import { fromServer, lookupTag, receive, summarize, toPayload, type RfsState } from '../logic/rfs'
 import { MAX, parseTagNoOnly, withinLength } from '../lib/tag'
 import { useGuard } from '../state/guard'
 import { usePersistentState } from '../state/persist'
 import { useUi } from '../state/ui'
+import { DocScreenView, Remain, useExit, type DocScreen } from './DocFlow'
 
 interface ResLine { iszjPo: string; itaPo: string; partName: string; shipQty: number; acceptQty: number }
 
 export function Rfs() {
-  const nav = useNavigate()
   const guard = useGuard()
-  const { notify, confirm } = useUi()
+  const { alert, confirm } = useUi()
   const [doc, setDoc, clear] = usePersistentState<RfsState | null>('rfs', null)
-  const [note, setNote] = useState('')
+  const [screen, setScreen] = useState<DocScreen>('doc')
   const [tag, setTag] = useState('')
   const [tagNo, setTagNo] = useState('')
   const [qty, setQty] = useState('')
-  const [result, setResult] = useState<{ ok: boolean; message?: string; rows: ResLine[] } | null>(null)
+  const [result, setResult] = useState<ResultData | null>(null)
+  const exit = useExit(clear)
 
   const load = async (raw: string) => {
-    if (!raw) return
-    if (!withinLength(raw, MAX.deliveryNote)) return notify('Invalid Digit', 'error')
-    const res = await guard(() => api.get<ShippingDoc>(`/handheld/shipping/rfs?deliveryNoteNo=${encodeURIComponent(raw)}`))
-    if (!res) return
-    if (res.status !== 'SUCCESS') return notify(`${res.status}: ${res.message ?? ''}`, 'error')
-    if (!res.result?.hShippingInvoiceDetailDTOs?.length || !res.result.hStocks?.length) return notify('Not Found Data From Server', 'error')
+    if (!raw) { await alert('Please Scan Delivery Note'); return false }
+    if (!withinLength(raw, MAX.deliveryNote)) { await alert('Invalid Digit'); return false }
+    const parts = raw.split('+')
+    if (parts.length !== 2) { await alert('Invalid Format'); return false }
+    if (parts[1].toUpperCase() !== 'R') { await alert('Invalid Shipping Type'); return false }
+    setDoc(null)
+    const res = await guard(() => api.get<ShippingDoc>(`/handheld/shipping/rfs?deliveryNoteNo=${encodeURIComponent(parts[0])}`))
+    if (!res) return false
+    if (res.status !== 'SUCCESS') { await alert(`${res.status}:${res.message ?? ''}`, 'Error'); return false }
+    if (!res.result?.hShippingInvoiceDetailDTOs || !res.result.hStocks) { await alert('Not Found Data From Server', 'Error'); return false }
     setDoc(fromServer(res.result))
-    setNote('')
-  }
-
-  const pickTag = (raw: string) => {
-    if (!doc || !raw) return
-    if (!withinLength(raw, MAX.tag)) return notify('Invalid Digit', 'error')
-    const no = parseTagNoOnly(raw)
-    if (!no) return notify('Invalid TAG format', 'error')
-    const info = lookupTag(doc, no)
-    if (!info) { setTag(''); return notify(`Not Found ITA TAG Card in Delivery Note\n${no}`, 'error') }
-    setTagNo(no)
-    setQty(String(info.suggestedQty))
+    return true
   }
 
   const reset = () => { setTag(''); setTagNo(''); setQty('') }
 
-  const add = () => {
+  const scan = async (raw: string) => {
+    if (!doc) return
+    if (!raw) return void (await alert('Please Scan ITA TAG No'))
+    if (!withinLength(raw, MAX.tag)) return void (await alert('Invalid Digit'))
+    const no = parseTagNoOnly(raw)
+    if (!no) return void (await alert('Invalid Format'))
+    const info = lookupTag(doc, no)
+    if (!info) { setTag(''); return void (await alert(`Not Found ITA TAG Card in Delivery Note\n${no}`)) }
+    setTag(no)
+    setTagNo(no)
+    setQty(String(info.stockQty))
+  }
+
+  const add = async () => {
     if (!doc || !tagNo) return
+    if (!qty.trim()) return void (await alert('Please Input Shipping Qty'))
     const r = receive(doc, tagNo, Number(qty))
     if (!r.ok) {
-      notify(r.error, 'error')
-      if (r.error.startsWith('Over Quantity') || r.error === 'Invalid Quantity') return
-      return reset()
+      await alert(r.error, 'Error')
+      if (!r.error.startsWith('Over Quantity') && r.error !== 'Invalid Quantity') reset()
+      return
     }
     setDoc(r.state!)
     reset()
@@ -61,59 +69,83 @@ export function Rfs() {
 
   const send = async () => {
     if (!doc || !(await confirm('Do you want to confirm ?'))) return
-    const res = await guard(() => api.put<{ hShippingInvoiceDetailDTOs?: ResLine[] } | null>('/handheld/shipping/rfs', toPayload(doc)))
-    if (!res) return
-    if (!res.result?.hShippingInvoiceDetailDTOs) return notify(`${res.status} : ${res.message ?? ''}`, 'error')
-    setResult({ ok: res.status === 'SUCCESS', message: res.message, rows: res.result.hShippingInvoiceDetailDTOs })
+    const res = await guard.resend(() => api.put<{ hShippingInvoiceDetailDTOs?: ResLine[] } | null>('/handheld/shipping/rfs', toPayload(doc)))
+    if (res === undefined) return
+    if (res === 'cancel') { clear(); setScreen('doc'); return }
+    if (!res.result?.hShippingInvoiceDetailDTOs) return void (await alert(`${res.status} : ${res.message ?? ''}`, 'Error'))
+    const subtitle = `Delivery Note : ${doc.deliveryNoteNo}`
+    clear()
+    setScreen('doc')
+    reset()
+    setResult({
+      ok: res.status === 'SUCCESS',
+      subtitle,
+      grid: { cols: ['ITA PO', 'Part Name', 'Shipping Qty'], rows: res.result.hShippingInvoiceDetailDTOs.map((r) => [r.itaPo, r.partName, r.acceptQty]), red: [] },
+    })
   }
 
-  const exit = () => { clear(); nav('/') }
+  if (result) return <ResultScreens process="Shipping (RFS)" data={result} onClose={exit} />
 
-  if (result) {
+  const note = doc ? `Delivery Note : ${doc.deliveryNoteNo}` : ''
+
+  if (screen === 'view' && doc) {
+    const s = summarize(doc)
     return (
-      <ResultPanel
-        title="Shipping RFS"
-        ok={result.ok}
-        message={result.message}
-        cols={['PROMIS PO', 'ITA PO', 'Part', 'Ship', 'Accept']}
-        rows={result.rows.map((r) => [r.iszjPo, r.itaPo, r.partName, r.shipQty, r.acceptQty])}
-        onDone={() => { if (result.ok) exit(); else setResult(null) }}
-      />
+      <Screen title="Shipping (RFS)" bar={[{ label: 'Back', onClick: () => setScreen('doc') }, { label: 'Confirm', onClick: send, hidden: !s.canConfirm }]}>
+        <div className="docline">{note}</div>
+        <Remain ok={s.canConfirm}>{s.canConfirm ? `Shipping (${s.rows.length})` : `Shipping Remain (${s.rows.length})`}</Remain>
+        <Grid cols={['ITA PO', 'Part Name', 'Shipping Qty']} rows={s.rows.map((r) => [r.itaPo, r.partName, r.acceptQty])} />
+      </Screen>
     )
   }
 
-  if (!doc) {
+  if (screen === 'tag' && doc) {
+    const info = tagNo ? lookupTag(doc, tagNo) : null
+    const first = doc.details.find((d) => info && d.itaPo === info.itaPo)
     return (
-      <Page title="Shipping RFS">
-        <label className="field">Delivery Note No</label>
-        <ScanInput value={note} onChange={setNote} onSubmit={load} placeholder="Scan delivery note" />
-        <button className="btn btn-primary block" onClick={() => load(note.trim())}>Search</button>
-      </Page>
+      <Screen title="Shipping (RFS)" bar={[{ label: 'Back', onClick: () => { reset(); setScreen('doc') } }, { label: 'Next', onClick: () => setScreen('view') }]}>
+        <div className="docline">{note}</div>
+        <div className="info">
+          {info && (
+            <>
+              <div>ITA PO : {info.itaPo}</div>
+              <div>Part Name : {first?.partName}</div>
+              <div>Order Qty : {info.shipQty}</div>
+              <div>Shipping Qty : {info.acceptQty}</div>
+            </>
+          )}
+        </div>
+        <Field label="ITA TAG No :">
+          <ScanInput value={tag} onChange={setTag} onSubmit={scan} disabled={!!tagNo} />
+        </Field>
+        {info && (
+          <>
+            <Field label="Qty :">
+              <input value={info.shipQty} disabled readOnly />
+            </Field>
+            <Field label="Shipping Qty :">
+              <ScanInput value={qty} onChange={setQty} onSubmit={add} inputMode="numeric" />
+            </Field>
+            <div className="row center">
+              <button className="btn btn-gray" onClick={reset}>Cancel</button>
+              <button className="btn btn-gray" onClick={add}>Add</button>
+            </div>
+          </>
+        )}
+      </Screen>
     )
   }
 
-  const s = summarize(doc)
-  const info = tagNo ? lookupTag(doc, tagNo) : null
   return (
-    <Page title="Shipping RFS" onBack={exit}>
-      <p>Delivery Note : <b>{doc.deliveryNoteNo}</b></p>
-      <label className="field">ITA TAG No</label>
-      <ScanInput value={tag} onChange={setTag} onSubmit={pickTag} placeholder="Scan ITA tag" disabled={!!tagNo} />
-      {info && (
-        <>
-          <p>ITA PO : <b>{info.itaPo}</b> · Ship Qty : <b>{info.shipQty}</b> · Accepted : <b>{info.acceptQty}</b></p>
-          <label className="field">Receive Qty</label>
-          <ScanInput value={qty} onChange={setQty} onSubmit={add} inputMode="numeric" />
-          <div className="row">
-            <button className="btn" onClick={reset}>Cancel</button>
-            <button className="btn btn-primary" onClick={add}>Add</button>
-          </div>
-        </>
-      )}
-      <h2 className={s.canConfirm ? 'ok' : 'warn'}>{s.canConfirm ? `Received (${s.rows.length})` : `Remaining (${s.rows.length})`}</h2>
-      <Table cols={['ITA PO', 'PROMIS PO', 'Part', 'Ship', 'Accept']}
-        rows={s.rows.map((r) => [r.itaPo, r.iszjPo, r.partName, r.shipQty, r.acceptQty])} />
-      {s.canConfirm && <button className="btn btn-primary block" onClick={send}>Confirm</button>}
-    </Page>
+    <DocScreenView
+      title="Shipping (RFS)"
+      label="Delivery Note :"
+      loaded={!!doc}
+      docLabel={note}
+      onLoad={load}
+      onBack={exit}
+      onNext={() => setScreen('tag')}
+      onView={() => setScreen('view')}
+    />
   )
 }

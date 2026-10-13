@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import type { ReceiptResult } from '../api/types'
-import { Page, ResultPanel } from '../components/Page'
+import { Field, Grid, Screen, Sub } from '../components/Page'
+import { ResultScreens, toGrid, type ResultData } from '../components/ResultScreens'
 import { ScanInput } from '../components/ScanInput'
 import { MAX, withinLength } from '../lib/tag'
 import { useGuard } from '../state/guard'
@@ -10,69 +11,110 @@ import { usePersistentState } from '../state/persist'
 import { useUi } from '../state/ui'
 
 interface Slip { deliverySlipNo: string; invoiceFlag: boolean }
+type Mode = 'Add' | 'Edit' | 'Delete'
 
 export function Receipt() {
   const nav = useNavigate()
   const guard = useGuard()
-  const { notify, confirm } = useUi()
+  const { alert, confirm } = useUi()
   const [slips, setSlips, clear] = usePersistentState<Slip[]>('receipt', [])
+  const [screen, setScreen] = useState<'scan' | 'view'>('scan')
+  const [mode, setMode] = useState<Mode>('Add')
   const [scan, setScan] = useState('')
   const [invoice, setInvoice] = useState(false)
-  const [result, setResult] = useState<{ ok: boolean; message?: string; rows: ReceiptResult[] } | null>(null)
+  const [armed, setArmed] = useState(false)
+  const [result, setResult] = useState<ResultData | null>(null)
 
-  const add = (raw: string) => {
-    if (!raw) return notify('Please Scan Delivery Slip No', 'error')
-    if (!withinLength(raw, MAX.deliverySlip)) return notify('Invalid Digit', 'error')
-    if (slips.some((s) => s.deliverySlipNo === raw)) return notify('Duplicate Delivery Slip No', 'error')
-    setSlips([...slips, { deliverySlipNo: raw, invoiceFlag: invoice }])
+  const reset = (next: Mode = 'Add') => {
+    setMode(next)
     setScan('')
     setInvoice(false)
+    setArmed(false)
+  }
+
+  const find = (no: string) => slips.find((s) => s.deliverySlipNo === no)
+
+  const onEnter = async (raw: string) => {
+    if (!raw) return void (await alert('Please Scan Delivery Slip No'))
+    if (!withinLength(raw, MAX.deliverySlip)) return void (await alert('Invalid Digit'))
+    if (mode === 'Add') {
+      if (find(raw)) return void (await alert('Duplicate Delivery Slip No'))
+    } else {
+      const s = find(raw)
+      if (!s) return void (await alert('Not Found Delivery Slip No'))
+      setInvoice(s.invoiceFlag)
+    }
+    setArmed(true)
+  }
+
+  const process = async () => {
+    const no = scan.trim()
+    if (!no) return void (await alert('Please Scan Delivery Slip No'))
+    if (!withinLength(no, MAX.deliverySlip)) return void (await alert('Invalid Digit'))
+    if (mode === 'Add') {
+      if (find(no)) return void (await alert('Duplicate Delivery Slip No'))
+      setSlips([...slips, { deliverySlipNo: no, invoiceFlag: invoice }])
+    } else {
+      if (!find(no)) return void (await alert('Not Found Delivery Slip No'))
+      setSlips(mode === 'Edit' ? slips.map((s) => (s.deliverySlipNo === no ? { ...s, invoiceFlag: invoice } : s)) : slips.filter((s) => s.deliverySlipNo !== no))
+    }
+    reset()
   }
 
   const send = async () => {
     if (!(await confirm('Do you want to confirm ?'))) return
-    const res = await guard(() => api.put<ReceiptResult[]>('/handheld/receipt/deliveryslip', slips))
-    if (!res) return
-    setResult({ ok: res.status === 'SUCCESS', message: res.message, rows: res.result ?? [] })
+    const res = await guard.resend(() => api.put<ReceiptResult[]>('/handheld/receipt/deliveryslip', slips))
+    if (res === undefined) return
+    clear()
+    reset()
+    setScreen('scan')
+    if (res === 'cancel') return
+    setResult({
+      ok: res.status === 'SUCCESS',
+      grid: res.result
+        ? toGrid(res.result, ['Delivery Slip No', 'Invoice Flag', 'Status', 'Reason'], (r) => [r.deliverySlipNo, r.invoiceFlag ? 'Yes' : 'No', r.status, r.reason ?? ''])
+        : null,
+    })
   }
 
-  if (result) {
+  if (result) return <ResultScreens process="Receipt" data={result} onClose={() => nav('/')} />
+
+  if (screen === 'view') {
     return (
-      <ResultPanel
-        title="Receipt"
-        ok={result.ok}
-        message={result.message}
-        cols={['Delivery Slip No', 'Invoice', 'Status', 'Reason']}
-        rows={result.rows.map((r) => [r.deliverySlipNo, r.invoiceFlag ? 'Yes' : 'No', r.status, r.reason])}
-        onDone={() => {
-          if (result.ok) { clear(); nav('/') } else setResult(null)
-        }}
-      />
+      <Screen title="Receipt" bar={[{ label: 'Back', onClick: () => setScreen('scan') }, { label: 'Confirm', onClick: send, hidden: slips.length === 0 }]}>
+        <Sub>Receipt</Sub>
+        <Grid cols={['Delivery Slip No.', 'Invoice']} rows={slips.map((s) => [s.deliverySlipNo, s.invoiceFlag ? 'YES' : 'NO'])} />
+      </Screen>
     )
   }
 
   return (
-    <Page title="Receipt" onBack={() => { clear(); nav('/') }}>
-      <label className="field">Delivery Slip No</label>
-      <ScanInput value={scan} onChange={setScan} onSubmit={add} placeholder="Scan delivery slip" />
-      <div className="row">
-        <label><input type="radio" checked={!invoice} onChange={() => setInvoice(false)} /> Invoice: No</label>
-        <label><input type="radio" checked={invoice} onChange={() => setInvoice(true)} /> Invoice: Yes</label>
+    <Screen
+      title="Receipt"
+      bar={[
+        { label: 'Back', onClick: () => (mode === 'Add' ? (clear(), nav('/')) : reset()) },
+        { label: 'Edit', onClick: () => reset('Edit'), hidden: slips.length === 0 },
+        { label: 'Delete', onClick: () => reset('Delete'), hidden: slips.length === 0 },
+        { label: 'Next', onClick: () => setScreen('view'), hidden: slips.length === 0 },
+      ]}
+    >
+      <div className="info">
+        {armed && (
+          <>
+            <div>Delivery Slip No : {scan.trim()}</div>
+            <div>Invoice No : {invoice ? 'Yes' : 'No'}</div>
+          </>
+        )}
       </div>
-      <button className="btn btn-primary block" onClick={() => add(scan.trim())}>Add</button>
-
-      <h2>Scanned ({slips.length})</h2>
-      {slips.length === 0 && <p className="muted">Nothing scanned yet</p>}
-      {slips.map((s) => (
-        <div className="row chip" key={s.deliverySlipNo}>
-          <span>{s.deliverySlipNo}</span>
-          <button className="btn" onClick={() => setSlips(slips.map((x) => x === s ? { ...x, invoiceFlag: !x.invoiceFlag } : x))}>
-            Invoice: {s.invoiceFlag ? 'Yes' : 'No'}
-          </button>
-          <button className="btn btn-danger" onClick={() => setSlips(slips.filter((x) => x !== s))}>Delete</button>
-        </div>
-      ))}
-      {slips.length > 0 && <button className="btn btn-primary block" onClick={send}>Confirm</button>}
-    </Page>
+      <Field label={mode === 'Add' ? 'Delivery Slip No :' : `Delivery Slip No : (${mode})`}>
+        <ScanInput value={scan} onChange={setScan} onSubmit={onEnter} />
+      </Field>
+      <div className="row">
+        <span>Invoice :</span>
+        <label><input type="radio" checked={!invoice} onChange={() => { setInvoice(false); setArmed(true) }} /> No</label>
+        <label><input type="radio" checked={invoice} onChange={() => { setInvoice(true); setArmed(true) }} /> Yes</label>
+      </div>
+      <button className="btn btn-gray block" onClick={process}>{mode}</button>
+    </Screen>
   )
 }

@@ -1,91 +1,116 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import type { ShippingDoc } from '../api/types'
-import { Page, ResultPanel, Table } from '../components/Page'
+import { Field, Grid, Screen } from '../components/Page'
+import { ResultScreens, type ResultData } from '../components/ResultScreens'
 import { ScanInput } from '../components/ScanInput'
 import { fromServer, scanPromis, summarize, toPayload, type OverseaState } from '../logic/oversea'
-import { MAX, parseTagNoOnly, withinLength } from '../lib/tag'
+import { MAX, withinLength } from '../lib/tag'
 import { useGuard } from '../state/guard'
 import { usePersistentState } from '../state/persist'
 import { useUi } from '../state/ui'
+import { DocScreenView, Remain, useExit, type DocScreen } from './DocFlow'
 
-interface ResLine { iszjPo: string; itaPo: string; partName: string; shipQty: number; accpetQty?: number; acceptQty?: number }
+interface ResLine { iszjPo: string; itaPo?: string; partName?: string; shipQty?: number; accpetQty?: number; acceptQty?: number }
 
 export function Oversea() {
-  const nav = useNavigate()
   const guard = useGuard()
-  const { notify, confirm } = useUi()
+  const { alert, confirm } = useUi()
   const [doc, setDoc, clear] = usePersistentState<OverseaState | null>('oversea', null)
-  const [note, setNote] = useState('')
+  const [screen, setScreen] = useState<DocScreen>('doc')
   const [tag, setTag] = useState('')
-  const [result, setResult] = useState<{ ok: boolean; message?: string; rows: ResLine[] } | null>(null)
+  const [tagShown, setTagShown] = useState('')
+  const [result, setResult] = useState<ResultData | null>(null)
+  const exit = useExit(clear)
 
   const load = async (raw: string) => {
-    if (!raw) return
-    if (!withinLength(raw, MAX.deliveryNote)) return notify('Invalid Digit', 'error')
-    const res = await guard(() => api.get<ShippingDoc>(`/handheld/shipping?deliveryNoteNo=${encodeURIComponent(raw)}`))
-    if (!res) return
-    if (res.status !== 'SUCCESS') return notify(`${res.status}: ${res.message ?? ''}`, 'error')
-    if (!res.result?.hShippingInvoiceDetailDTOs?.length) return notify('Not Found Data From Server', 'error')
+    if (!raw) { await alert('Please Scan Delivery Note'); return false }
+    if (!withinLength(raw, MAX.deliveryNote)) { await alert('Invalid Digit'); return false }
+    const parts = raw.split('+')
+    if (parts.length !== 2) { await alert('Invalid Format'); return false }
+    if (parts[1].toUpperCase() !== 'O') { await alert('Invalid Shipping Type'); return false }
+    setDoc(null)
+    const res = await guard(() => api.get<ShippingDoc>(`/handheld/shipping?deliveryNoteNo=${encodeURIComponent(parts[0])}`))
+    if (!res) return false
+    if (res.status !== 'SUCCESS') { await alert(`${res.status}:${res.message ?? ''}`, 'Error'); return false }
+    if (!res.result?.hShippingInvoiceDetailDTOs) { await alert('Not Found Data From Server', 'Error'); return false }
     setDoc(fromServer(res.result))
-    setNote('')
+    return true
   }
 
-  const scan = (raw: string) => {
-    if (!doc || !raw) return
-    if (!withinLength(raw, MAX.promisTag)) return notify('Invalid Digit', 'error')
-    const no = parseTagNoOnly(raw)
-    if (!no) return notify('Invalid TAG format', 'error')
-    const r = scanPromis(doc, no)
-    if (!r.ok) { setTag(''); return notify(r.error, 'error') }
+  const scan = async (raw: string) => {
+    if (!doc) return
+    if (!raw) return void (await alert('Please Scan PROMIS TAG No'))
+    if (!withinLength(raw, MAX.promisTag)) return void (await alert('Invalid Digit'))
+    const parts = raw.split('+')
+    if (parts.length !== 2) return void (await alert('Invalid Format'))
+    const r = scanPromis(doc, parts[0])
+    if (!r.ok) return void (await alert(r.error, 'Error'))
     setDoc(r.state)
+    setTagShown(parts[0])
     setTag('')
   }
 
   const send = async () => {
     if (!doc || !(await confirm('Do you want to confirm ?'))) return
-    const res = await guard(() => api.put<{ hShippingInvoiceDetailDTOs?: ResLine[] } | null>('/handheld/shipping', toPayload(doc)))
-    if (!res) return
-    if (!res.result?.hShippingInvoiceDetailDTOs) return notify(`${res.status} : ${res.message ?? ''}`, 'error')
-    setResult({ ok: res.status === 'SUCCESS', message: res.message, rows: res.result.hShippingInvoiceDetailDTOs })
+    const res = await guard.resend(() => api.put<{ hShippingInvoiceDetailDTOs?: ResLine[] } | null>('/handheld/shipping', toPayload(doc)))
+    if (res === undefined) return
+    if (res === 'cancel') { clear(); setScreen('doc'); return }
+    if (!res.result?.hShippingInvoiceDetailDTOs) return void (await alert(`${res.status} : ${res.message ?? ''}`, 'Error'))
+    const subtitle = `Delivery Note : ${doc.deliveryNoteNo}`
+    clear()
+    setScreen('doc')
+    setTagShown('')
+    setResult({
+      ok: res.status === 'SUCCESS',
+      subtitle,
+      grid: {
+        cols: ['PROMIS TAG No.'],
+        rows: res.result.hShippingInvoiceDetailDTOs.map((r) => [r.iszjPo]),
+        red: [],
+      },
+    })
   }
 
-  const exit = () => { clear(); nav('/') }
+  if (result) return <ResultScreens process="Shipping (Oversea)" data={result} onClose={exit} />
 
-  if (result) {
+  const note = doc ? `Delivery Note : ${doc.deliveryNoteNo}` : ''
+
+  if (screen === 'view' && doc) {
+    const s = summarize(doc)
     return (
-      <ResultPanel
-        title="Shipping Oversea"
-        ok={result.ok}
-        message={result.message}
-        cols={['PROMIS PO', 'ITA PO', 'Part', 'Ship', 'Accept']}
-        rows={result.rows.map((r) => [r.iszjPo, r.itaPo, r.partName, r.shipQty, r.accpetQty ?? r.acceptQty])}
-        onDone={() => { if (result.ok) exit(); else setResult(null) }}
-      />
+      <Screen title="Shipping (Oversea)" bar={[{ label: 'Back', onClick: () => setScreen('doc') }, { label: 'Confirm', onClick: send, hidden: !s.canConfirm }]}>
+        <div className="docline">{note}</div>
+        <Remain ok={s.canConfirm}>{s.canConfirm ? `PROMIS TAG (${s.rows.length})` : `PROMIS TAG Remain (${s.rows.length})`}</Remain>
+        <Grid cols={['PROMIS TAG No.']} rows={s.rows.map((r) => [r.iszjPo])} />
+      </Screen>
     )
   }
 
-  if (!doc) {
+  if (screen === 'tag' && doc) {
     return (
-      <Page title="Shipping Oversea">
-        <label className="field">Delivery Note No</label>
-        <ScanInput value={note} onChange={setNote} onSubmit={load} placeholder="Scan delivery note" />
-        <button className="btn btn-primary block" onClick={() => load(note.trim())}>Search</button>
-      </Page>
+      <Screen title="Shipping (Oversea)" bar={[{ label: 'Back', onClick: () => setScreen('doc') }, { label: 'Next', onClick: () => setScreen('view') }]}>
+        <div className="info">
+          <div>{note}</div>
+          {tagShown && <div>PROMIS TAG No : {tagShown}</div>}
+        </div>
+        <Field label="PROMIS TAG No :">
+          <ScanInput value={tag} onChange={setTag} onSubmit={scan} />
+        </Field>
+      </Screen>
     )
   }
 
-  const s = summarize(doc)
   return (
-    <Page title="Shipping Oversea" onBack={exit}>
-      <p>Delivery Note : <b>{doc.deliveryNoteNo}</b></p>
-      <label className="field">PROMIS TAG No</label>
-      <ScanInput value={tag} onChange={setTag} onSubmit={scan} placeholder="Scan PROMIS tag" />
-      <h2 className={s.canConfirm ? 'ok' : 'warn'}>{s.canConfirm ? `Received (${s.rows.length})` : `Remaining (${s.rows.length})`}</h2>
-      <Table cols={['PROMIS PO', 'ITA PO', 'Part', 'Ship', 'Accept']}
-        rows={s.rows.map((r) => [r.iszjPo, r.itaPo, r.partName, r.shipQty, r.acceptQty])} />
-      {s.canConfirm && <button className="btn btn-primary block" onClick={send}>Confirm</button>}
-    </Page>
+    <DocScreenView
+      title="Shipping (Oversea)"
+      label="Delivery Note :"
+      loaded={!!doc}
+      docLabel={note}
+      onLoad={load}
+      onBack={exit}
+      onNext={() => setScreen('tag')}
+      onView={() => setScreen('view')}
+    />
   )
 }

@@ -40,13 +40,11 @@ export function lookupTag(state: RsoState, tagNo: string) {
   const keys = new Set(stocks.map((s) => `${s.iszjPo}|${s.itaPo}`))
   const details = state.details.filter((d) => keys.has(`${d.iszjPo}|${d.itaPo}`))
   if (details.length === 0) return null
-  const stockRemain = stocks.reduce((n, s) => n + (s.qty - s.acceptQty), 0)
-  const requestRemain = details.reduce((n, d) => n + (d.requestQty - d.stockOutQty), 0)
   return {
     itaPo: details[0].itaPo,
     requestQty: details.reduce((n, d) => n + d.requestQty, 0),
     stockOutQty: details.reduce((n, d) => n + d.stockOutQty, 0),
-    suggestedQty: Math.max(0, Math.min(stockRemain, requestRemain)),
+    stockQty: stocks.reduce((n, s) => n + s.qty, 0),
   }
 }
 

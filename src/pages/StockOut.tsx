@@ -1,59 +1,64 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import type { RsoDoc } from '../api/types'
-import { Page, ResultPanel, Table } from '../components/Page'
+import { Field, Grid, Screen } from '../components/Page'
+import { ResultScreens, type ResultData } from '../components/ResultScreens'
 import { ScanInput } from '../components/ScanInput'
 import { fromServer, lookupTag, stockOut, summarize, toPayload, type RsoState } from '../logic/stockout'
 import { MAX, parseTagNoOnly, withinLength } from '../lib/tag'
 import { useGuard } from '../state/guard'
 import { usePersistentState } from '../state/persist'
 import { useUi } from '../state/ui'
+import { DocScreenView, Remain, useExit, type DocScreen } from './DocFlow'
 
-interface ResLine { iszjPo: string; itaPo: string; iszjQty: number; requestQty: number; stockOutQty: number }
+interface ResLine { iszjPo: string; itaPo: string; requestQty: number; stockOutQty: number }
 
 export function StockOut() {
-  const nav = useNavigate()
   const guard = useGuard()
-  const { notify, confirm } = useUi()
+  const { alert, confirm } = useUi()
   const [doc, setDoc, clear] = usePersistentState<RsoState | null>('stock-out', null)
-  const [reqNo, setReqNo] = useState('')
+  const [screen, setScreen] = useState<DocScreen>('doc')
   const [tag, setTag] = useState('')
   const [tagNo, setTagNo] = useState('')
   const [qty, setQty] = useState('')
-  const [result, setResult] = useState<{ ok: boolean; message?: string; rows: ResLine[] } | null>(null)
+  const [result, setResult] = useState<ResultData | null>(null)
+  const exit = useExit(clear)
 
   const load = async (raw: string) => {
-    if (!raw) return
-    if (!withinLength(raw, MAX.requestNo)) return notify('Invalid Digit', 'error')
+    if (!raw) { await alert('Please Scan Request Stock Out'); return false }
+    if (!withinLength(raw, MAX.requestNo)) { await alert('Invalid Digit'); return false }
+    setDoc(null)
     const res = await guard(() => api.get<RsoDoc>(`/handheld/rso?requestNo=${encodeURIComponent(raw)}`))
-    if (!res) return
-    if (res.status !== 'SUCCESS') return notify(`${res.status}: ${res.message ?? ''}`, 'error')
-    if (!res.result?.hRequestStockOutDetailDTOs?.length || !res.result.hStocks?.length) return notify('Not Found Data From Server', 'error')
+    if (!res) return false
+    if (res.status !== 'SUCCESS') { await alert(`${res.status}:${res.message ?? ''}`, 'Error'); return false }
+    if (!res.result?.hRequestStockOutDetailDTOs || !res.result.hStocks) { await alert('Not Found Data From Server', 'Error'); return false }
     setDoc(fromServer(res.result, raw))
-    setReqNo('')
-  }
-
-  const pickTag = (raw: string) => {
-    if (!doc || !raw) return
-    if (!withinLength(raw, MAX.tag)) return notify('Invalid Digit', 'error')
-    const no = parseTagNoOnly(raw)
-    if (!no) return notify('Invalid TAG format', 'error')
-    const info = lookupTag(doc, no)
-    if (!info) { setTag(''); return notify(`Not Found ITA TAG Card in Request Stock Out\n${no}`, 'error') }
-    setTagNo(no)
-    setQty(String(info.suggestedQty))
+    return true
   }
 
   const reset = () => { setTag(''); setTagNo(''); setQty('') }
 
-  const add = () => {
+  const scan = async (raw: string) => {
+    if (!doc) return
+    if (!raw) return
+    if (!withinLength(raw, MAX.tag)) return
+    const no = parseTagNoOnly(raw)
+    if (!no) return void (await alert('Invalid Format'))
+    const info = lookupTag(doc, no)
+    if (!info) { setTag(''); return void (await alert(`Not Found ITA TAG Card in Request Stock Out\n${no}`)) }
+    setTag(no)
+    setTagNo(no)
+    setQty(String(info.stockQty))
+  }
+
+  const add = async () => {
     if (!doc || !tagNo) return
+    if (!qty.trim()) return void (await alert('Please Input Stock Out Qty'))
     const r = stockOut(doc, tagNo, Number(qty))
     if (!r.ok) {
-      notify(r.error, 'error')
-      if (r.error.startsWith('Over Quantity') || r.error === 'Invalid Quantity') return
-      return reset()
+      await alert(r.error, 'Error')
+      if (!r.error.startsWith('Over Quantity') && r.error !== 'Invalid Quantity') reset()
+      return
     }
     setDoc(r.state!)
     reset()
@@ -61,58 +66,81 @@ export function StockOut() {
 
   const send = async () => {
     if (!doc || !(await confirm('Do you want to confirm ?'))) return
-    const res = await guard(() => api.put<{ hRequestStockOutDetailDTOs?: ResLine[] } | null>('/handheld/rso', toPayload(doc)))
-    if (!res) return
-    if (!res.result?.hRequestStockOutDetailDTOs) return notify(`${res.status} : ${res.message ?? ''}`, 'error')
-    setResult({ ok: res.status === 'SUCCESS', message: res.message, rows: res.result.hRequestStockOutDetailDTOs })
+    const res = await guard.resend(() => api.put<{ hRequestStockOutDetailDTOs?: ResLine[] } | null>('/handheld/rso', toPayload(doc)))
+    if (res === undefined) return
+    if (res === 'cancel') { clear(); setScreen('doc'); return }
+    if (!res.result?.hRequestStockOutDetailDTOs) return void (await alert(`${res.status} : ${res.message ?? ''}`, 'Error'))
+    const subtitle = `Request Stock Out : ${doc.requestNo}`
+    clear()
+    setScreen('doc')
+    reset()
+    setResult({
+      ok: res.status === 'SUCCESS',
+      subtitle,
+      grid: { cols: ['ITA PO', 'Request Qty', 'Stock Out Qty'], rows: res.result.hRequestStockOutDetailDTOs.map((r) => [r.itaPo, r.requestQty, r.stockOutQty]), red: [] },
+    })
   }
 
-  const exit = () => { clear(); nav('/') }
+  if (result) return <ResultScreens process="Request Stock Out" data={result} onClose={exit} />
 
-  if (result) {
+  const note = doc ? `Request Stock Out : ${doc.requestNo}` : ''
+
+  if (screen === 'view' && doc) {
+    const s = summarize(doc)
     return (
-      <ResultPanel
-        title="Request Stock Out"
-        ok={result.ok}
-        message={result.message}
-        cols={['PROMIS PO', 'ITA PO', 'Request', 'Stock Out']}
-        rows={result.rows.map((r) => [r.iszjPo, r.itaPo, r.requestQty, r.stockOutQty])}
-        onDone={() => { if (result.ok) exit(); else setResult(null) }}
-      />
+      <Screen title="Request Stock Out" bar={[{ label: 'Back', onClick: () => setScreen('doc') }, { label: 'Confirm', onClick: send, hidden: !s.canConfirm }]}>
+        <div className="docline">{note}</div>
+        <Remain ok={s.canConfirm}>{s.canConfirm ? `Stock Out (${s.rows.length})` : `Stock Out Remain (${s.rows.length})`}</Remain>
+        <Grid cols={['ITA PO', 'Request Qty', 'Stock Out Qty']} rows={s.rows.map((r) => [r.itaPo, r.requestQty, r.stockOutQty])} />
+      </Screen>
     )
   }
 
-  if (!doc) {
+  if (screen === 'tag' && doc) {
+    const info = tagNo ? lookupTag(doc, tagNo) : null
     return (
-      <Page title="Request Stock Out">
-        <label className="field">Request No</label>
-        <ScanInput value={reqNo} onChange={setReqNo} onSubmit={load} placeholder="Scan request no (RSO-…)" />
-        <button className="btn btn-primary block" onClick={() => load(reqNo.trim())}>Search</button>
-      </Page>
+      <Screen title="Request Stock Out" bar={[{ label: 'Back', onClick: () => { reset(); setScreen('doc') } }, { label: 'Next', onClick: () => setScreen('view') }]}>
+        <div className="docline">{note}</div>
+        <div className="info">
+          {info && (
+            <>
+              <div>ITA PO : {info.itaPo}</div>
+              <div>Request Qty : {info.requestQty}</div>
+              <div>Stock Out Qty : {info.stockOutQty}</div>
+            </>
+          )}
+        </div>
+        <Field label="ITA TAG No :">
+          <ScanInput value={tag} onChange={setTag} onSubmit={scan} disabled={!!tagNo} />
+        </Field>
+        {info && (
+          <>
+            <Field label="Stock Qty :">
+              <input value={info.requestQty} disabled readOnly />
+            </Field>
+            <Field label="Stock Out Qty :">
+              <ScanInput value={qty} onChange={setQty} onSubmit={add} inputMode="numeric" />
+            </Field>
+            <div className="row center">
+              <button className="btn btn-gray" onClick={reset}>Cancel</button>
+              <button className="btn btn-gray" onClick={add}>Add</button>
+            </div>
+          </>
+        )}
+      </Screen>
     )
   }
 
-  const s = summarize(doc)
-  const info = tagNo ? lookupTag(doc, tagNo) : null
   return (
-    <Page title="Request Stock Out" onBack={exit}>
-      <p>Request Stock Out : <b>{doc.requestNo}</b></p>
-      <label className="field">ITA TAG No</label>
-      <ScanInput value={tag} onChange={setTag} onSubmit={pickTag} placeholder="Scan ITA tag" disabled={!!tagNo} />
-      {info && (
-        <>
-          <p>ITA PO : <b>{info.itaPo}</b> · Request Qty : <b>{info.requestQty}</b> · Stock Out : <b>{info.stockOutQty}</b></p>
-          <label className="field">Stock Out Qty</label>
-          <ScanInput value={qty} onChange={setQty} onSubmit={add} inputMode="numeric" />
-          <div className="row">
-            <button className="btn" onClick={reset}>Cancel</button>
-            <button className="btn btn-primary" onClick={add}>Add</button>
-          </div>
-        </>
-      )}
-      <h2 className={s.canConfirm ? 'ok' : 'warn'}>{s.canConfirm ? `Stock Out (${s.rows.length})` : `Stock Out Remain (${s.rows.length})`}</h2>
-      <Table cols={['ITA PO', 'Request', 'Stock Out']} rows={s.rows.map((r) => [r.itaPo, r.requestQty, r.stockOutQty])} />
-      {s.canConfirm && <button className="btn btn-primary block" onClick={send}>Confirm</button>}
-    </Page>
+    <DocScreenView
+      title="Request Stock Out"
+      label="Request Stock Out :"
+      loaded={!!doc}
+      docLabel={note}
+      onLoad={load}
+      onBack={exit}
+      onNext={() => setScreen('tag')}
+      onView={() => setScreen('view')}
+    />
   )
 }
