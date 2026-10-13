@@ -68,6 +68,23 @@ export function ScanInput({ value, onChange, onSubmit, placeholder, disabled, in
   )
 }
 
+function cameraErrorMessage(e: unknown): string {
+  const name = e instanceof DOMException ? e.name : ''
+  switch (name) {
+    case 'NotAllowedError':
+    case 'SecurityError':
+      return 'Camera permission was denied. Allow camera access for this site in the browser (site settings), or open the page in Chrome instead of an in-app browser, then try again.'
+    case 'NotFoundError':
+    case 'OverconstrainedError':
+      return 'No camera was found on this device.'
+    case 'NotReadableError':
+    case 'AbortError':
+      return 'The camera is in use by another app. Close it and try again.'
+    default:
+      return `Cannot open the camera${name ? ` (${name})` : ''}. Open the page in Chrome and allow camera access.`
+  }
+}
+
 function CameraScanner({ onResult, onClose }: { onResult: (v: string) => void; onClose: () => void }) {
   const video = useRef<HTMLVideoElement>(null)
   const [error, setError] = useState('')
@@ -97,8 +114,8 @@ function CameraScanner({ onResult, onClose }: { onResult: (v: string) => void; o
           raf = requestAnimationFrame(tick)
         }
         tick()
-      } catch {
-        setError('Cannot open the camera. Check browser permission (HTTPS is required).')
+      } catch (e) {
+        setError(cameraErrorMessage(e))
       }
     })()
     return () => {
