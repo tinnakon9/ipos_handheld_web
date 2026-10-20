@@ -12,6 +12,7 @@ body { margin: 0; background: #d1d5db; color: #111827; font-size: 17px; }
 .field { margin: 6px 0 10px; }
 .field label { display: block; margin-bottom: 4px; font-weight: 700; font-size: 20px; }
 .scan { display: flex; gap: 6px; }
+.scan .btn { flex: 0 0 auto; padding: 4px 14px; font-size: 34px; line-height: 1; }
 input:not([type=radio]) { width: 100%; padding: 10px; font-size: 18px; border: 1px solid var(--line); border-radius: 4px; }
 input:disabled { background: #e5e7eb; }
 .info { background: var(--light); margin: 0 -12px 14px; padding: 10px 14px; min-height: 84px; font-size: 15px; }

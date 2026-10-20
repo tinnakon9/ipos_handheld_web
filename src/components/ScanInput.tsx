@@ -21,7 +21,7 @@ declare global {
 export function ScanInput({ value, onChange, onSubmit, placeholder, disabled, inputMode = 'text', autoFocus = true }: Props) {
   const ref = useRef<HTMLInputElement>(null)
   const [camera, setCamera] = useState(false)
-  const hasCamera = typeof window !== 'undefined' && !!window.BarcodeDetector && !!navigator.mediaDevices?.getUserMedia
+  const hasCamera = typeof window !== 'undefined' && !!navigator.mediaDevices?.getUserMedia
 
   useEffect(() => {
     if (autoFocus && !disabled && !camera) ref.current?.focus()
@@ -99,7 +99,10 @@ function CameraScanner({ onResult, onClose }: { onResult: (v: string) => void; o
         if (stopped || !video.current) return
         video.current.srcObject = stream
         await video.current.play()
-        const detector = new window.BarcodeDetector!()
+        // iOS (all browsers use WebKit) has no native BarcodeDetector: fall back to a WASM ponyfill.
+        const Det = window.BarcodeDetector ?? (await import('barcode-detector/ponyfill')).BarcodeDetector
+        if (stopped) return
+        const detector = new Det() as Detector
         const tick = async () => {
           if (stopped || !video.current) return
           try {
