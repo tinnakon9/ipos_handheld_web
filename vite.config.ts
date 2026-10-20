@@ -10,6 +10,8 @@ export default defineConfig({
   // relative base so the build works under https://<user>.github.io/<repo>/
   base: './',
   define: { __BUILD__: JSON.stringify(sha) },
+  // Vite's default target needs Safari 16.4+; transpile down so older iPhones can open the app too
+  build: { target: ['es2020', 'safari14'] },
   plugins: [react()],
   test: { environment: 'node' },
 })

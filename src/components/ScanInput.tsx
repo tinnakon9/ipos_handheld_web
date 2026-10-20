@@ -132,7 +132,7 @@ function CameraScanner({ onResult, onClose }: { onResult: (v: string) => void; o
   return (
     <div className="modal-backdrop">
       <div className="modal">
-        {error ? <p>{error}</p> : <video ref={video} playsInline muted style={{ width: '100%', borderRadius: 8 }} />}
+        {error ? <p>{error}</p> : <video ref={video} autoPlay playsInline muted style={{ width: '100%', borderRadius: 8 }} />}
         <button className="btn" onClick={onClose}>Close</button>
       </div>
     </div>
