@@ -4,12 +4,12 @@ import { useSession } from '../state/session'
 import { useUi } from '../state/ui'
 
 const ITEMS = [
-  ['/receipt', 'Receipt'],
-  ['/stock-in', 'Stock In'],
-  ['/change-location', 'Change Location'],
-  ['/oversea', 'Shipping (Oversea)'],
-  ['/rfs', 'Shipping (RFS)'],
-  ['/stock-out', 'Request Stock Out'],
+  ['/receipt', 'Receipt', '📥'],
+  ['/stock-in', 'Stock In', '📦'],
+  ['/change-location', 'Change Location', '📍'],
+  ['/oversea', 'Shipping (Oversea)', '🚢'],
+  ['/rfs', 'Shipping (RFS)', '🚚'],
+  ['/stock-out', 'Request Stock Out', '📤'],
 ] as const
 
 export function Menu() {
@@ -23,8 +23,11 @@ export function Menu() {
       bar={[{ label: 'Logout', onClick: async () => (await confirm('Do you want to logout ?', 'Exit (Y/N).')) && logout() }]}
     >
       <div className="menu">
-        {ITEMS.map(([to, label]) => (
-          <button key={to} className="btn btn-menu" onClick={() => nav(to)}>{label}</button>
+        {ITEMS.map(([to, label, icon]) => (
+          <button key={to} className="btn btn-menu" onClick={() => nav(to)}>
+            <span className="ico" aria-hidden>{icon}</span>
+            {label}
+          </button>
         ))}
       </div>
     </Screen>
